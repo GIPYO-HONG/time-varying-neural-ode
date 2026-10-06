@@ -19,7 +19,7 @@ RUN_NAME = Path(__file__).stem
 # Data
 
 y0 = jnp.array([4865., 9., 68., 0., 0.])
-params = jnp.array([0.0003671, 0.0006762, 0.0027400, 0.8500000, 0.0001500, 0.0300000, 0.3500000]) #mm, r, dd, ss, kk, aa, gg
+params = jnp.array([1 / 3.5, 1 / 5])
 
 def make_data():
     df = pd.read_csv(BASE_DIR / "influenza_sydney_1919.csv")
@@ -98,26 +98,24 @@ class Main(eqx.Module):
         return jnn.softplus(self.raw_params)
 
     def func(self, t, y, args):
-        S, E, I, R, C = y
+            S, E, I, R, C = y
+    
+            bb = self.beta(t)
+    
+            params, d = args
+            dd, gg = params
+    
+            dS = - d * bb * S * I
+            dE = - d * dd * E + d * bb * S * I
+            dI = d * dd * E - d * gg * I
+            dR = d * gg * I
+            dC = d * dd * E
+    
+            dy = jnp.array([dS, dE, dI, dR, dC])
+    
+            return dy
 
-        N = S + E + I + R
-
-        bb = self.beta(t)
-
-        params, d = args
-        mm, r, dd, ss, kk, aa, gg = params
-
-        dS = - d * bb * I * S / N - d * mm * S + d * r * N + d * dd * R
-        dE = d * bb * I * S / N - d * (mm + ss + kk) * E
-        dI = d * ss * E - d * (mm + aa + gg) * I
-        dR = d * kk * E + d * gg * I - d * mm * R - d * dd * R
-        dC = d * ss * E
-
-        dy = jnp.array([dS, dE, dI, dR, dC])
-
-        return dy
-
-    def __call__(self, ts, days, ys_max):
+    def __call__(self, ts, days):
 
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
@@ -165,7 +163,7 @@ class Experiment:
 
         def loss_fn(params):
             model = eqx.combine(params, static)
-            pred_ = model(self.ts, self.days, self.ys_max)[:,4]
+            pred_ = model(self.ts, self.days)[:,4]
             pred = jnp.diff(pred_)
             observe = self.ys[1:]
             scale = jnp.maximum(jnp.max(observe), jnp.finfo(self.ys.dtype).eps)
@@ -243,10 +241,10 @@ def evaluate(exp):
     ts_normal_eval = jnp.linspace(ts_normal_data[0], ts_normal_data[-1], (len(ts_normal_data) - 1) * 4 + 1)
     ts_eval = ts_normal_eval * days
 
-    pred_normal_eval = exp.model(ts_normal_eval, days, ys_max)
+    pred_normal_eval = exp.model(ts_normal_eval, days)
     pred_eval = pred_normal_eval * ys_max
 
-    pred_data = exp.model(ts_normal_data, days, ys_max) * ys_max
+    pred_data = exp.model(ts_normal_data, days) * ys_max
     incidence_pred = jnp.diff(pred_data[:, 4])
     ts_incidence = ts_data[1:]
     ys_incidence = ys_data[1:]
@@ -292,19 +290,6 @@ def evaluate(exp):
     ax.set_ylabel("Loss")
     fig.tight_layout()
     fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-    # residual
-    residual = ys_incidence - incidence_pred
-    fig, ax = plt.subplots(figsize=(14, 4))
-    ax.axhline(0, color="tab:gray", linestyle="--", linewidth=1)
-    ax.plot(ts_incidence, residual, ".", color="tab:red")
-    ax.set_xlabel("Days since first observation")
-    ax.set_ylabel("Observed − predicted cases")
-    ax.set_title("Observation residuals")
-    ax.grid(alpha=0.25)
-    fig.tight_layout()
-    fig.savefig(results_dir / "residual.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
     # Results
