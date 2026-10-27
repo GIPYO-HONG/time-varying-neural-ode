@@ -7,6 +7,8 @@ __pycache__/
 results/
 weights/
 
+patient_plots/
+
 plot_covid19.py
 plot_influ.py
 plot_syn.py

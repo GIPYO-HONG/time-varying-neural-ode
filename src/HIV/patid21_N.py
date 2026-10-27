@@ -23,7 +23,7 @@ df = pd.read_csv(path, sep=r"\s+", header=0, names=["obs_no", "patid", "day", "l
 df = df.astype({"patid": int, "day": float, "log10_rna": float, "cd4": float})
 df = df.sort_values(["patid", "day"]).reset_index(drop=True)
 
-params = jnp.array([19.9, 0.01, 0.7, 2000, 13]) # ll, d, dd, N, c
+params = jnp.array([10.0, 0.01, 0.7, 8e-4, 13.]) # ll, d, dd, k, c
 
 def make_data(patid):
     sub = df[df["patid"] == patid]
@@ -53,38 +53,6 @@ def softplus_inverse(value):
     """Map a positive physical value to its unconstrained softplus parameter."""
     return value + jnp.log(-jnp.expm1(-value))
 
-# NUM = 5
-
-# class Param(eqx.Module):
-#     mlp: eqx.nn.MLP
-
-#     def __init__(self, width_size, depth, *, key):
-
-#         self.mlp = eqx.nn.MLP(
-#             in_size = 2 * NUM + 1,
-#             out_size=1,
-#             width_size=width_size,
-#             depth=depth,
-#             activation=jnn.tanh,
-#             final_activation=jnn.softplus,
-#             key=key,
-#         )
-
-#     def __call__(self, t):
-#         freq = 2.0 ** jnp.arange(NUM)
-
-#         angles = 2.0 * jnp.pi * freq * t
-
-#         features = jnp.concatenate([
-#             jnp.atleast_1d(t),
-#             jnp.sin(angles),
-#             jnp.cos(angles),
-#         ])
-
-#         out = self.mlp(features)
-
-#         return out.squeeze()
-
 class Param(eqx.Module):
     mlp: eqx.nn.MLP
 
@@ -96,7 +64,7 @@ class Param(eqx.Module):
             width_size=width_size,
             depth=depth,
             activation=jnn.tanh,
-            final_activation=lambda x: 0.001 * jnn.sigmoid(x),
+            final_activation=lambda x: jnn.sigmoid(x),
             key=key,
         )
 
@@ -104,12 +72,12 @@ class Param(eqx.Module):
         return self.mlp(jnp.atleast_1d(t)).squeeze()
 
 class Main(eqx.Module):
-    k: Param
+    pp: Param
     raw_y0: jnp.ndarray
     log_params: jnp.ndarray
 
     def __init__(self, width_size, depth, y0, scale, *, key):
-        self.k = Param(width_size, depth, key=key)
+        self.pp = Param(width_size, depth, key=key)
         self.log_params = jnp.log(params)
 
         I0 = jnp.minimum(20 / scale[0], y0[0] / 2)
@@ -121,19 +89,19 @@ class Main(eqx.Module):
         states = jnn.softplus(self.raw_y0)
         return states
 
-
     @property
     def params(self):
-        # Learn relative changes while keeping all physical parameters positive.
         return jnp.exp(self.log_params)
 
     def func(self, t, y, args):
         S, I, V = y
 
-        k = self.k(t)
+        N = self.pp(t)
+
+        N = 10000 * N
 
         params, days, scale = args
-        ll, d, dd, N, c = params
+        ll, d, dd, k, c = params
         ss1, ss2 = scale
 
         dS = days * ll / ss1 - days * d * S - days * k * ss2 * V * S
@@ -148,12 +116,12 @@ class Main(eqx.Module):
 
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
-            diffrax.Tsit5(),
-            # diffrax.Kvaerno5(),
+            # diffrax.Tsit5(),
+            diffrax.Kvaerno5(),
             t0=ts[0],
             t1=ts[-1],
             # dt0=ts[1]-ts[0],
-            dt0=1e-5,
+            dt0=1e-6,
             y0=self.y0,
             args=(self.params, days, scale),
             saveat=diffrax.SaveAt(ts=ts),
@@ -274,42 +242,56 @@ def evaluate(exp):
     T_eval = pred_eval[:, 0] + pred_eval[:, 1]
     V_eval = pred_eval[:, 2]
     observed_pred = jnp.stack([pred_data[:, 0] + pred_data[:, 1], pred_data[:, 2]], axis=1)
-    k_eval = jax.vmap(exp.model.k)(ts_normal_eval)
+    pp_eval = jax.vmap(exp.model.pp)(ts_normal_eval)
+    N_eval = 5000 * pp_eval
+    checkpoint_loss = float(jnp.mean(jnp.square((observed_pred - ys_data) / scale)))
 
-    # data + pred // k
-    fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=True)
+    # data + pred // N(t) // c(t)
+    fig, axes = plt.subplots(3, 1, figsize=(14, 14), sharex=True)
     for index, (name, prediction) in enumerate(zip(("T", "V"), (T_eval, V_eval))):
         axes[index].plot(ts_eval, prediction, label="Prediction", color="tab:blue")
         axes[index].scatter(ts_data, ys_data[:, index], label="Data", s=20, color="tab:orange")
         axes[index].set_ylabel(name)
         axes[index].set_title(f"Observed and Predicted {name}")
         axes[index].legend()
-    axes[2].plot(ts_eval, k_eval, label="k", color="tab:green")
-    axes[2].set_ylabel("k")
-    axes[2].set_title("Estimated k(t)")
+    axes[2].plot(ts_eval, N_eval, label="N(t)", color="tab:green")
+    axes[2].set_ylabel("N")
+    axes[2].set_title("Estimated viral production parameter N(t)")
     axes[2].legend()
     axes[-1].set_xlabel("Time (days)")
     fig.tight_layout()
-    fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_param.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # state: S, I, T (T = S + I)
+    # data + pred // k
     fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=True)
-    for ax, name, description, prediction in zip(
-        axes, ("S", "I", "T"),
-        ("Uninfected CD4 T cells", "Infected CD4 T cells", "Total CD4 T cells (S + I)"),
-        (pred_eval[:, 0], pred_eval[:, 1], T_eval),
-    ):
-        ax.plot(ts_eval, prediction, color="tab:blue", label=f"{name}: {description} (prediction)")
-        ax.set_ylabel(f"{name}: {description}")
-        ax.grid(alpha=0.25)
-    axes[2].scatter(ts_data, ys_data[:, 0], color="tab:orange", s=20, label="Observed total CD4 T cells")
-    for ax in axes:
-        ax.legend()
-    axes[-1].set_xlabel("Time (days)")
-    fig.suptitle("Predicted States", fontsize=16)
+
+    # T: Observed and Predicted
+    axes[0].plot(ts_eval, T_eval, label="Prediction", color="tab:blue")
+    axes[0].scatter(ts_data, ys_data[:, 0], label="Data", s=20, color="tab:orange")
+    axes[0].set_ylabel("T")
+    axes[0].set_title("Observed and Predicted T")
+    axes[0].legend()
+
+    # V: Observed and Predicted
+    axes[1].plot(ts_eval, V_eval, label="Prediction", color="tab:blue")
+    axes[1].scatter(ts_data, ys_data[:, 1], label="Data", s=20, color="tab:orange")
+    axes[1].set_ylabel("V")
+    axes[1].set_title("Observed and Predicted V")
+    axes[1].set_yscale("log")
+    axes[1].legend()
+
+    # k: Estimated k(t)
+    axes[2].plot(ts_eval, N_eval, label="k", color="tab:green")
+    axes[2].set_ylabel("k")
+    axes[2].set_title("Estimated N(t)")
+    axes[2].legend()
+
+    # Common settings
+    axes[2].set_xlabel("Time (days)")
+
     fig.tight_layout()
-    fig.savefig(results_dir / "states.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
     # loss
@@ -340,7 +322,7 @@ def evaluate(exp):
     # Results
     lines = [
         f"experiment: {RUN_NAME}",
-        f"best checkpoint loss: {exp.best_loss:.8e}",
+        f"best checkpoint loss: {checkpoint_loss:.8e}",
         f"T l2 relative error: {l2_rel_error(observed_pred[:, 0], ys_data[:, 0]):.8e}",
         f"V l2 relative error: {l2_rel_error(observed_pred[:, 1], ys_data[:, 1]):.8e}",
     ]
@@ -350,16 +332,17 @@ def evaluate(exp):
         lines.append(f"{name}: {value:.8e}")
     lines.append(f"T0: {learned_y0[0] + learned_y0[1]:.8e}")
     lines.append("learned parameters:")
-    for name, value in zip(("lambda", "d", "delta", "N", "c"), np.asarray(exp.model.params)):
+    for name, value in zip(("lambda", "d", "delta", "k", "c"), np.asarray(exp.model.params)):
         lines.append(f"{name}: {value:.8e}")
+    lines.append("time-varying parameters (evaluation grid):")
     (results_dir / "error.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 if __name__ == "__main__":
     # training part
-    patid = 27 #1~45
+    patid = 21 #1~45
     y0, ts, ys, days, scale = make_data(patid)
     exp = Experiment(y0, ts, ys, days, scale)
-    exp.train(lr=1e-5, steps=500000, viz_loss=1000)
+    exp.train(lr=1e-5, steps=100000, viz_loss=1000)
 
     # # evaluation part
     evaluate(exp)

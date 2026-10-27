@@ -29,9 +29,6 @@ POPULATION = jnp.sum(y0)
 params = jnp.array([1 / 3.5, 1 / 5])
 
 def make_data(start=None, end=None):
-    """
-    설명
-    """
     sub = df.copy()
 
     if start is not None:
@@ -273,10 +270,13 @@ def evaluate(exp):
     axes[0].plot(ts_incidence, incidence_pred, label="pred", color="tab:blue")
     axes[0].scatter(ts_incidence, ys_incidence, label="data", s=4, color="tab:orange")
     axes[0].set_title("Observed Data and Model Prediction")
+    axes[0].set_xlabel("Days")
+    axes[0].set_ylabel("Incidence")
     axes[0].legend()
 
     axes[1].plot(ts_eval, beta_eval, label="beta", color="tab:green")
     axes[1].set_title("Estimated Parameter")
+    axes[1].set_xlabel("Days")
     axes[1].legend()
 
     fig.tight_layout()
@@ -307,19 +307,6 @@ def evaluate(exp):
     fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    # residual
-    residual = ys_incidence - incidence_pred
-    fig, ax = plt.subplots(figsize=(14, 4))
-    ax.axhline(0, color="tab:gray", linestyle="--", linewidth=1)
-    ax.plot(ts_incidence, residual, ".", color="tab:red")
-    ax.set_xlabel("Days since first observation")
-    ax.set_ylabel("Observed − predicted cases")
-    ax.set_title("Observation residuals")
-    ax.grid(alpha=0.25)
-    fig.tight_layout()
-    fig.savefig(results_dir / "residual.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
     # Results
     lines = [
         f"experiment: {RUN_NAME}",
@@ -329,7 +316,7 @@ def evaluate(exp):
 
     learned_y0 = np.asarray(exp.model.y0) * POPULATION
     lines.append("initial states (people):")
-    for name, value in zip(("S0", "E0", "I0", "R0"), learned_y0[:4]):
+    for name, value in zip(("S0", "E0", "I0"), learned_y0[:3]):
         lines.append(f"{name}: {value:.8e}")
 
     (results_dir / "error.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -340,5 +327,5 @@ if __name__ == "__main__":
     exp = Experiment(y0, ts, ys, days)
     exp.train(lr=1e-5, steps=50000, lam_d2 = 0.)
 
-    # # evaluation part
+    # evaluation part
     evaluate(exp)

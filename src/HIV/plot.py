@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 
 BASE_DIR = Path(__file__).resolve().parent
 
+SAVE_DIR = BASE_DIR / "patient_plots"
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
 path = BASE_DIR / "ACTG315.csv"
 df = pd.read_csv(path, sep=r"\s+", header=0,
                  names=["obs_no", "patid", "day", "log10_rna", "cd4"])
@@ -27,9 +30,10 @@ def plot(patid):
     axes[1].grid(True, linestyle="--", alpha=0.4)
 
     fig.tight_layout()
-    fig.savefig(BASE_DIR / f"data_patient_{patid}.png", dpi=200, bbox_inches="tight")
+    fig.savefig(SAVE_DIR / f"data_patient_{patid}.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 if __name__ == "__main__":
-    patid = 10
-    plot(patid)
+    for i in range(1,47):
+        patid = i
+        plot(patid)

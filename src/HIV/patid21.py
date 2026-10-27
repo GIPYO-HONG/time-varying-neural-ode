@@ -53,38 +53,6 @@ def softplus_inverse(value):
     """Map a positive physical value to its unconstrained softplus parameter."""
     return value + jnp.log(-jnp.expm1(-value))
 
-# NUM = 5
-
-# class Param(eqx.Module):
-#     mlp: eqx.nn.MLP
-
-#     def __init__(self, width_size, depth, *, key):
-
-#         self.mlp = eqx.nn.MLP(
-#             in_size = 2 * NUM + 1,
-#             out_size=1,
-#             width_size=width_size,
-#             depth=depth,
-#             activation=jnn.tanh,
-#             final_activation=jnn.softplus,
-#             key=key,
-#         )
-
-#     def __call__(self, t):
-#         freq = 2.0 ** jnp.arange(NUM)
-
-#         angles = 2.0 * jnp.pi * freq * t
-
-#         features = jnp.concatenate([
-#             jnp.atleast_1d(t),
-#             jnp.sin(angles),
-#             jnp.cos(angles),
-#         ])
-
-#         out = self.mlp(features)
-
-#         return out.squeeze()
-
 class Param(eqx.Module):
     mlp: eqx.nn.MLP
 
@@ -124,7 +92,6 @@ class Main(eqx.Module):
 
     @property
     def params(self):
-        # Learn relative changes while keeping all physical parameters positive.
         return jnp.exp(self.log_params)
 
     def func(self, t, y, args):
@@ -149,10 +116,8 @@ class Main(eqx.Module):
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
             diffrax.Tsit5(),
-            # diffrax.Kvaerno5(),
             t0=ts[0],
             t1=ts[-1],
-            # dt0=ts[1]-ts[0],
             dt0=1e-5,
             y0=self.y0,
             args=(self.params, days, scale),
@@ -278,17 +243,30 @@ def evaluate(exp):
 
     # data + pred // k
     fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=True)
-    for index, (name, prediction) in enumerate(zip(("T", "V"), (T_eval, V_eval))):
-        axes[index].plot(ts_eval, prediction, label="Prediction", color="tab:blue")
-        axes[index].scatter(ts_data, ys_data[:, index], label="Data", s=20, color="tab:orange")
-        axes[index].set_ylabel(name)
-        axes[index].set_title(f"Observed and Predicted {name}")
-        axes[index].legend()
+
+    # T: Observed and Predicted
+    axes[0].plot(ts_eval, T_eval, label="Prediction", color="tab:blue")
+    axes[0].scatter(ts_data, ys_data[:, 0], label="Data", s=20, color="tab:orange")
+    axes[0].set_ylabel("T")
+    axes[0].set_title("Observed and Predicted T")
+    axes[0].legend()
+
+    # V: Observed and Predicted
+    axes[1].plot(ts_eval, V_eval, label="Prediction", color="tab:blue")
+    axes[1].scatter(ts_data, ys_data[:, 1], label="Data", s=20, color="tab:orange")
+    axes[1].set_ylabel("V")
+    axes[1].set_title("Observed and Predicted V")
+    axes[1].legend()
+
+    # k: Estimated k(t)
     axes[2].plot(ts_eval, k_eval, label="k", color="tab:green")
     axes[2].set_ylabel("k")
     axes[2].set_title("Estimated k(t)")
     axes[2].legend()
-    axes[-1].set_xlabel("Time (days)")
+
+    # Common settings
+    axes[2].set_xlabel("Time (days)")
+
     fig.tight_layout()
     fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -356,7 +334,7 @@ def evaluate(exp):
 
 if __name__ == "__main__":
     # training part
-    patid = 10 #1~45
+    patid = 21 #1~45
     y0, ts, ys, days, scale = make_data(patid)
     exp = Experiment(y0, ts, ys, days, scale)
     exp.train(lr=1e-5, steps=500000, viz_loss=1000)

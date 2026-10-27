@@ -18,8 +18,8 @@ RUN_NAME = Path(__file__).stem
 
 # Data
 
-y0 = jnp.array([4865., 9., 68., 0., 0.])
-params = jnp.array([1 / 3.5, 1 / 5])
+y0 = jnp.array([50000., 1000., 100., 0., 0.])
+params = jnp.array([0.0500, 0.3000])
 
 def make_data():
     df = pd.read_csv(BASE_DIR / "influenza_sydney_1919.csv")
@@ -84,7 +84,6 @@ class Main(eqx.Module):
 
     def __init__(self, width_size, depth, y0, *, key):
         self.beta = Beta(width_size, depth, key=key)
-        # A small positive floor keeps zero initial states trainable.
         self.raw_y0 = softplus_inverse(jnp.maximum(y0[:4], 1e-6))
         self.raw_params = softplus_inverse(params)
 
@@ -258,10 +257,13 @@ def evaluate(exp):
     axes[0].plot(ts_incidence, incidence_pred, label="pred", color="tab:blue")
     axes[0].scatter(ts_incidence, ys_incidence, label="data", s=4, color="tab:orange")
     axes[0].set_title("Observed Data and Model Prediction")
+    axes[0].set_xlabel("Days")
+    axes[0].set_ylabel("Incidence")
     axes[0].legend()
 
     axes[1].plot(ts_eval, beta_eval, label="beta", color="tab:green")
     axes[1].set_title("Estimated Parameter")
+    axes[1].set_xlabel("Days")
     axes[1].legend()
 
     fig.tight_layout()
@@ -314,6 +316,7 @@ def evaluate(exp):
 
 if __name__ == "__main__":
     # training part
+    NUM=2
     y0, ts, ys, days, ys_max = make_data()
     exp = Experiment(y0, ts, ys, days, ys_max)
     exp.train(lr=1e-5, steps=500000)

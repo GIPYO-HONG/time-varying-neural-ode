@@ -19,9 +19,9 @@ RUN_NAME = Path(__file__).stem
 
 y0 = jnp.array([5e7, 20000., 40000., 720000., 0.])
 POPULATION = jnp.sum(y0)
-ts = jnp.linspace(0, 365, 366)
+ts = jnp.linspace(0, 300, 301)
 
-params = jnp.array([1/5, 1/10]) #dd, gg, aa
+params = jnp.array([1/5, 1/10]) #dd, gg
 
 def beta(t):
     period = 365 / 3
@@ -101,24 +101,6 @@ class Beta(eqx.Module):
         out = self.mlp(features)
 
         return out.squeeze()
-
-# class Beta(eqx.Module):
-#     mlp: eqx.nn.MLP
-
-#     def __init__(self, width_size, depth, *, key):
-
-#         self.mlp = eqx.nn.MLP(
-#             in_size = 1,
-#             out_size=1,
-#             width_size=width_size,
-#             depth=depth,
-#             activation=jnn.tanh,
-#             final_activation=jnn.softplus,
-#             key=key,
-#         )
-
-#     def __call__(self, t):
-#         return self.mlp(jnp.atleast_1d(t)).squeeze()
 
 class Main(eqx.Module):
     beta: Beta
@@ -287,11 +269,14 @@ def evaluate(exp):
     axes[0].plot(ts_incidence, incidence_pred, label="pred", color="tab:blue", zorder=1)
     axes[0].scatter(ts_incidence, ys_incidence, label="data", s=2, color="tab:orange", zorder=2)
     axes[0].set_title("Observed Data and Model Prediction")
+    axes[0].set_xlabel("Days")
+    axes[0].set_ylabel("Incidence")
     axes[0].legend()
 
     axes[1].plot(ts_eval, beta(ts_eval), label="beta true", color="tab:orange")
     axes[1].plot(ts_eval, beta_eval, label="beta pred", linestyle="--", color="tab:blue")
     axes[1].set_title("Estimated Parameter")
+    axes[1].set_xlabel("Days")
     axes[1].legend()
 
     fig.tight_layout()
@@ -342,9 +327,10 @@ def evaluate(exp):
 
 if __name__ == "__main__":
     # training part
+    NUM = 2
     y0, ts, ys, days = make_data(y0, ts)
     exp = Experiment(y0, ts, ys, days)
-    exp.train(lr=1e-5, steps=500000, lam_d2 = 1e-8)
+    exp.train(lr=1e-5, steps=200000, lam_d2 = 1e-8)
 
     # # evaluation part
     evaluate(exp)

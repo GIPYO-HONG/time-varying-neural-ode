@@ -10,9 +10,10 @@ RUN_NAME = Path(__file__).stem
 
 y0 = jnp.array([5e7, 20000., 40000., 720000., 0.])
 POPULATION = jnp.sum(y0)
-ts = jnp.linspace(0, 365, 366)
+ts = jnp.linspace(0, 300, 301)
 
-params = jnp.array([1/5, 1/10, 1/180]) #dd, gg, aa
+params = jnp.array([1/5, 1/10]) #dd, gg, aa
+
 
 def beta(t):
     period = 365 / 3
@@ -20,13 +21,13 @@ def beta(t):
     return 0.1 * decay * jnp.sin(2 * jnp.pi * t /period) + 0.15
 
 def func(t, y, args):
-    dd, gg, aa = args
+    dd, gg = args
     S, E, I, R, C = y
 
-    dS = - beta(t) * S * I / POPULATION + aa * R
+    dS = - beta(t) * S * I / POPULATION
     dE = beta(t) * S * I / POPULATION - dd * E
     dI = dd * E - gg * I
-    dR = gg * I - aa * R
+    dR = gg * I
     dC = dd * E
     return jnp.array([dS, dE, dI, dR, dC])
 
