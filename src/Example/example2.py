@@ -232,7 +232,7 @@ if __name__ == "__main__":
     # training part
     y0, ts, ys = solve_ivp(y0, ts)
     exp = Experiment(y0, ts, ys)
-    # exp.train(lr=1e-5, steps=1000000)
+    exp.train(lr=1e-5, steps=1000000)
 
     # # evaluation part
     evaluate(exp)
