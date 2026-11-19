@@ -268,7 +268,7 @@ def evaluate(exp):
     axes[2].set_xlabel("Time (days)")
 
     fig.tight_layout()
-    fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_params.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # state: S, I, T (T = S + I)
@@ -287,7 +287,7 @@ def evaluate(exp):
     axes[-1].set_xlabel("Time (days)")
     fig.suptitle("Predicted States", fontsize=16)
     fig.tight_layout()
-    fig.savefig(results_dir / "states.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "states.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # loss
@@ -297,7 +297,7 @@ def evaluate(exp):
     ax.set_xlabel("Training step")
     ax.set_ylabel("Loss")
     fig.tight_layout()
-    fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "loss.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # residual: observed - predicted at observation times
@@ -312,7 +312,7 @@ def evaluate(exp):
         ax.grid(alpha=0.25)
     axes[-1].set_xlabel("Time (days)")
     fig.tight_layout()
-    fig.savefig(results_dir / "residual.png", dpi=300, bbox_inches="tight")
+    fig.savefig(results_dir / "residual.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # Results

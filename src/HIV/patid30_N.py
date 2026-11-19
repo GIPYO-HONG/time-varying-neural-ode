@@ -15,6 +15,7 @@ import time
 
 BASE_DIR = Path(__file__).resolve().parent
 RUN_NAME = Path(__file__).stem
+N_SCALE = 10000
 
 # Data
 
@@ -31,7 +32,8 @@ def make_data(patid):
     ts = jnp.array(sub["day"])
 
     T = jnp.array(sub["cd4"])
-    V = 10 ** jnp.array(sub["log10_rna"])
+    log10_rna = jnp.array(sub["log10_rna"])
+    V = 10 ** log10_rna
     ys = jnp.stack([T, V], axis=1)
 
     y0 = ys[0,:]
@@ -45,7 +47,7 @@ def make_data(patid):
     ts_normal = ts / days
     ys_normal = ys / scale
    
-    return y0_normal, ts_normal, ys_normal, days, scale
+    return y0_normal, ts_normal, ys_normal, days, scale, log10_rna
 
 # Model
 
@@ -96,9 +98,7 @@ class Main(eqx.Module):
     def func(self, t, y, args):
         S, I, V = y
 
-        N = self.pp(t)
-
-        N = 10000 * N
+        N = N_SCALE * self.pp(t)
 
         params, days, scale = args
         ll, d, dd, k, c = params
@@ -133,10 +133,19 @@ class Main(eqx.Module):
 
 # Training
 
+def observation_residuals(pred, ys, scale, log10_rna):
+    t_residual = pred[:, 0] + pred[:, 1] - ys[:, 0]
+    v_pred = pred[:, 2] * scale[1]
+    # Floor nonpositive solver outputs before taking the logarithm.
+    log_v_residual = jnp.log10(jnp.maximum(v_pred, 1e-6)) - log10_rna
+    return t_residual, log_v_residual
+
+
 class Experiment:
-    def __init__(self, y0, ts, ys, days, scale, width_size=64, depth=8, seed=5678):
+    def __init__(self, y0, ts, ys, days, scale, log10_rna, width_size=64, depth=8, seed=5678):
         self.model = Main(width_size, depth, y0, scale, key=jr.PRNGKey(seed))
         self.ts, self.ys, self.days, self.scale = ts, ys, days, scale
+        self.log10_rna = log10_rna
 
         self.weights_dir = Path(BASE_DIR) / "weights" / RUN_NAME
 
@@ -165,25 +174,24 @@ class Experiment:
             model = eqx.combine(params, static)
             pred = model(self.ts, self.days, self.scale)
 
-            T_pred = pred[:, 0] + pred[:, 1]
-            V_pred = pred[:, 2]
-            ys_pred = jnp.stack([T_pred, V_pred], axis=1)
-
-            data_loss = jnp.mean(jnp.square(ys_pred - self.ys))
-
-            return data_loss
+            t_residual, log_v_residual = observation_residuals(
+                pred, self.ys, self.scale, self.log10_rna
+            )
+            t_loss = jnp.mean(jnp.square(t_residual))
+            v_loss = jnp.mean(jnp.square(log_v_residual))
+            return t_loss + v_loss, (t_loss, v_loss)
             
-        loss_and_grad = eqx.filter_value_and_grad(loss_fn)
+        loss_and_grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)
 
         def keep_best(new, old, better):
             return jax.tree.map(lambda x, y: jnp.where(better, x, y), new, old)
 
         def step(carry, _):
             params, opt_state, best, best_loss = carry
-            loss, grads = loss_and_grad(params)
+            (loss, (t_loss, v_loss)), grads = loss_and_grad(params)
             better = loss < best_loss
             updates, opt_state = optim.update(grads, opt_state, params)
-            return (eqx.apply_updates(params, updates), opt_state, keep_best(params, best, better), jnp.where(better, loss, best_loss)), loss
+            return (eqx.apply_updates(params, updates), opt_state, keep_best(params, best, better), jnp.where(better, loss, best_loss)), (loss, t_loss, v_loss)
 
         @eqx.filter_jit
         def train_steps(params, opt_state, best, best_loss, count):
@@ -196,16 +204,22 @@ class Experiment:
         for epoch in range(0, steps, viz_loss):
             count = min(viz_loss, steps - epoch)
             t0 = time.time()
-            (params, opt_state, best, best_loss), losses = train_steps(params, opt_state, best, best_loss, count)
+            (params, opt_state, best, best_loss), (losses, t_losses, v_losses) = train_steps(
+                params, opt_state, best, best_loss, count
+            )
 
             self.loss_list.extend(np.asarray(losses).tolist())
             self.model = eqx.combine(params, static)
             self.save_ckpt(epoch + count)
 
-            print(f"step: {epoch + count:5d}, loss: {losses[-1]:.6e}, time: {time.time() - t0:.2f}s")
+            print(
+                f"step: {epoch + count:5d}, loss: {losses[-1]:.6e}, "
+                f"T MSE: {t_losses[-1]:.6e}, V log10 MSE: {v_losses[-1]:.6e}, "
+                f"time: {time.time() - t0:.2f}s"
+            )
 
     
-        final_loss = loss_fn(params)
+        final_loss, _ = loss_fn(params)
         better = final_loss < best_loss
         self.model = eqx.combine(keep_best(params, best, better), static)
         self.best_loss = float(jnp.where(better, final_loss, best_loss))
@@ -238,16 +252,23 @@ def evaluate(exp):
 
     state_scale = jnp.array([scale[0], scale[0], scale[1]])
     pred_eval = exp.model(ts_normal_eval, days, scale) * state_scale
-    pred_data = exp.model(ts_normal_data, days, scale) * state_scale
+    pred_normal_data = exp.model(ts_normal_data, days, scale)
+    pred_data = pred_normal_data * state_scale
     T_eval = pred_eval[:, 0] + pred_eval[:, 1]
     V_eval = pred_eval[:, 2]
     observed_pred = jnp.stack([pred_data[:, 0] + pred_data[:, 1], pred_data[:, 2]], axis=1)
     pp_eval = jax.vmap(exp.model.pp)(ts_normal_eval)
-    N_eval = 5000 * pp_eval
-    checkpoint_loss = float(jnp.mean(jnp.square((observed_pred - ys_data) / scale)))
+    N_eval = N_SCALE * pp_eval
+    t_residual, log_v_residual = observation_residuals(
+        pred_normal_data, ys_normal_data, scale, exp.log10_rna
+    )
+    t_loss = jnp.mean(jnp.square(t_residual))
+    v_loss = jnp.mean(jnp.square(log_v_residual))
+    checkpoint_loss = t_loss + v_loss
+    nonpositive_v_count = int(jnp.sum(pred_data[:, 2] <= 0))
 
     # data + pred // N(t) // c(t)
-    fig, axes = plt.subplots(3, 1, figsize=(14, 14), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=True)
     for index, (name, prediction) in enumerate(zip(("T", "V"), (T_eval, V_eval))):
         axes[index].plot(ts_eval, prediction, label="Prediction", color="tab:blue")
         axes[index].scatter(ts_data, ys_data[:, index], label="Data", s=20, color="tab:orange")
@@ -260,7 +281,7 @@ def evaluate(exp):
     axes[2].legend()
     axes[-1].set_xlabel("Time (days)")
     fig.tight_layout()
-    fig.savefig(results_dir / "data_param.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_param.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # data + pred // k
@@ -291,7 +312,7 @@ def evaluate(exp):
     axes[2].set_xlabel("Time (days)")
 
     fig.tight_layout()
-    fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_params.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # loss
@@ -301,13 +322,13 @@ def evaluate(exp):
     ax.set_xlabel("Training step")
     ax.set_ylabel("Loss")
     fig.tight_layout()
-    fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "loss.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # residual: observed - predicted at observation times
-    residual = ys_data - observed_pred
+    residual = -jnp.stack([t_residual * scale[0], log_v_residual], axis=1)
     fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
-    for index, (ax, name) in enumerate(zip(axes, ("T", "V"))):
+    for index, (ax, name) in enumerate(zip(axes, ("T", "log10 V"))):
         ax.axhline(0, color="tab:gray", linestyle="--", linewidth=1)
         ax.plot(ts_data, residual[:, index], ".", color="tab:red", label=f"{name} residual")
         ax.set_ylabel(f"Observed − predicted {name}")
@@ -316,13 +337,18 @@ def evaluate(exp):
         ax.grid(alpha=0.25)
     axes[-1].set_xlabel("Time (days)")
     fig.tight_layout()
-    fig.savefig(results_dir / "residual.png", dpi=300, bbox_inches="tight")
+    fig.savefig(results_dir / "residual.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # Results
     lines = [
         f"experiment: {RUN_NAME}",
         f"best checkpoint loss: {checkpoint_loss:.8e}",
+        f"T normalized MSE: {t_loss:.8e}",
+        f"V log10 MSE: {v_loss:.8e}",
+        f"T RMSE (original units): {jnp.sqrt(t_loss) * scale[0]:.8e}",
+        f"V log10 RMSE: {jnp.sqrt(v_loss):.8e}",
+        f"nonpositive V predictions at observation times: {nonpositive_v_count}",
         f"T l2 relative error: {l2_rel_error(observed_pred[:, 0], ys_data[:, 0]):.8e}",
         f"V l2 relative error: {l2_rel_error(observed_pred[:, 1], ys_data[:, 1]):.8e}",
     ]
@@ -340,8 +366,8 @@ def evaluate(exp):
 if __name__ == "__main__":
     # training part
     patid = 30 #1~45
-    y0, ts, ys, days, scale = make_data(patid)
-    exp = Experiment(y0, ts, ys, days, scale)
+    y0, ts, ys, days, scale, log10_rna = make_data(patid)
+    exp = Experiment(y0, ts, ys, days, scale, log10_rna)
     exp.train(lr=1e-5, steps=100000, viz_loss=1000)
 
     # # evaluation part

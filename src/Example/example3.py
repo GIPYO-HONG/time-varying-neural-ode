@@ -251,18 +251,18 @@ def evaluate(exp):
     axes[1].legend()
 
     fig.tight_layout()
-    fig.savefig(results_dir / "state_params.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "state_params.pdf", bbox_inches="tight")
     plt.close(fig)
 
-    # loss / 확인용
-    fig, ax = plt.subplots(figsize=(14, 7))
-    ax.semilogy(np.arange(1, losses.size + 1), losses, label="loss", color="tab:blue")
-    ax.legend()
-    ax.set_xlabel("Training step")
-    ax.set_ylabel("Loss")
-    fig.tight_layout()
-    fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    # # loss / 확인용
+    # fig, ax = plt.subplots(figsize=(14, 7))
+    # ax.semilogy(np.arange(1, losses.size + 1), losses, label="loss", color="tab:blue")
+    # ax.legend()
+    # ax.set_xlabel("Training step")
+    # ax.set_ylabel("Loss")
+    # fig.tight_layout()
+    # fig.savefig(results_dir / "loss.pdf", bbox_inches="tight")
+    # plt.close(fig)
 
     # Results
     lines = [
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     # training part
     y0, ts, ys = solve_ivp(y0, ts)
     exp = Experiment(y0, ts, ys)
-    exp.train(lr=1e-5, steps=100000, lam_d2=1e-10)
+    # exp.train(lr=1e-5, steps=100000, lam_d2=1e-10)
 
     # # evaluation part
     evaluate(exp)

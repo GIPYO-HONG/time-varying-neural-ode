@@ -280,7 +280,7 @@ def evaluate(exp):
     axes[1].legend()
 
     fig.tight_layout()
-    fig.savefig(results_dir / "data_params.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "data_params.pdf", bbox_inches="tight")
     plt.close(fig)
 
     # state
@@ -295,18 +295,18 @@ def evaluate(exp):
     axes[-1].set_xlabel("Time (days)")
     fig.suptitle("True vs Predicted States", fontsize=16)
     fig.tight_layout()
-    fig.savefig(results_dir / "states.png", dpi=200, bbox_inches="tight")
+    fig.savefig(results_dir / "states.pdf", bbox_inches="tight")
     plt.close(fig)
 
-    # loss / 확인용
-    fig, ax = plt.subplots(figsize=(14, 7))
-    ax.semilogy(np.arange(1, losses.size + 1), losses, label="loss", color="tab:blue")
-    ax.legend()
-    ax.set_xlabel("Training step")
-    ax.set_ylabel("Loss")
-    fig.tight_layout()
-    fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    # # loss / 확인용
+    # fig, ax = plt.subplots(figsize=(14, 7))
+    # ax.semilogy(np.arange(1, losses.size + 1), losses, label="loss", color="tab:blue")
+    # ax.legend()
+    # ax.set_xlabel("Training step")
+    # ax.set_ylabel("Loss")
+    # fig.tight_layout()
+    # fig.savefig(results_dir / "loss.png", dpi=200, bbox_inches="tight")
+    # plt.close(fig)
 
     # Results
     lines = [
